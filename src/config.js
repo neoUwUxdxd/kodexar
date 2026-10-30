@@ -10,11 +10,6 @@ export const BRAND = {
   email: 'kodexar@icloud.com',
   tagline: 'Si se puede imaginar, Kodexar lo programa',
   available: true,
-  // Endpoint real de FormSubmit (AJAX). La primera solicitud enviará
-  // un correo de activación a kodexar@icloud.com.
-  formEndpoint: 'https://formsubmit.co/ajax/kodexar@icloud.com',
-  // Respaldo: POST estándar (sin CORS) enviado desde un <form> oculto.
-  formFallbackEndpoint: 'https://formsubmit.co/kodexar@icloud.com',
   storageKey: 'kodexar:orders',
 }
 

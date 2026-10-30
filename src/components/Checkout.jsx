@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import {
-  AlertCircle, ArrowLeft, ArrowRight, Check, CheckCircle2, ClipboardCopy, Clock, Download, History, Loader2, Lock,
+  AlertCircle, ArrowLeft, ArrowRight, Check, ClipboardCopy, Clock, Download, History, Lock,
   LockOpen, Mail, MessageCircle, Phone, RotateCcw, Send, Trash2, User,
 } from 'lucide-react'
 import { BRAND, CATALOG, DIVISIONS, PAYMENT_METHODS, PRICING } from '../config.js'
@@ -49,66 +49,11 @@ export function validate(form) {
   return e
 }
 
-const IFRAME_NAME = 'hidden_formsubmit_iframe'
+const SUBJECT = (folio) => '🚀 Nueva Solicitud de Compra KODEXAR - Folio #' + folio
 
-function toFormData(fields) {
-  const fd = new FormData()
-  Object.entries(fields).forEach(([k, v]) => fd.append(k, v))
-  return fd
-}
-
-// Respaldo sin CORS: POST estándar desde un <form> oculto hacia el iframe oculto.
-// El navegador no deja leer la respuesta, así que la entrega queda "por confirmar".
-function submitHiddenForm(fields) {
-  return new Promise((resolve) => {
-    const form = document.createElement('form')
-    form.action = BRAND.formFallbackEndpoint
-    form.method = 'POST'
-    form.target = IFRAME_NAME
-    form.style.display = 'none'
-    Object.entries(fields).forEach(([k, v]) => {
-      const input = document.createElement('input')
-      input.type = 'hidden'
-      input.name = k
-      input.value = v
-      form.appendChild(input)
-    })
-    document.body.appendChild(form)
-    form.submit()
-    form.remove()
-    setTimeout(resolve, 1200)
-  })
-}
-
-// Envía el pedido: AJAX con FormData (sin preflight) y, si falla o pide activación,
-// respaldo con formulario oculto. Devuelve 'confirmed' o 'pending'.
-async function sendOrder(fields) {
-  try {
-    const res = await fetch(BRAND.formEndpoint, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: toFormData(fields),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (res.ok && String(data.success) === 'true') return 'confirmed'
-  } catch {
-    /* bloqueo del navegador, CORS o servidor caído: se usa el respaldo */
-  }
-  await submitHiddenForm(fields)
-  return 'pending'
-}
-
-function mailtoHref(o, text) {
-  const subject = `Solicitud de Compra KODEXAR - Folio #${o.folio}`
-  return `mailto:${BRAND.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`
-}
-
-function buildReceiptText(o) {
+function orderLines(o) {
   const line = '─'.repeat(44)
-  const confirmed = o.delivery === 'confirmed'
   return [
-    confirmed ? `KODEXAR — Recibo de Orden Confirmada` : `KODEXAR — Recibo de Orden (envío por confirmar)`,
-    line,
     `Folio:            #${o.folio}`,
     `Fecha:            ${o.date}`,
     `Cliente:          ${o.name}`,
@@ -129,13 +74,34 @@ function buildReceiptText(o) {
     line,
     `Descripción del proyecto:`,
     o.details,
+  ].filter((l) => l !== null)
+}
+
+// Correo que el cliente envía a Yamil desde su propia cuenta.
+function buildOrderEmail(o) {
+  return [`Hola ${BRAND.owner}, quiero hacer este pedido en ${BRAND.name}:`, '', ...orderLines(o), '', 'Quedo atento(a) a los datos de pago.', `— ${o.name}`].join('\n')
+}
+
+function buildReceiptText(o) {
+  const line = '─'.repeat(44)
+  return [
+    `KODEXAR — Recibo de Orden`,
     line,
-    ...(confirmed
-      ? [`${BRAND.owner} recibió tu solicitud en ${BRAND.email} y te contactará`, `para enviarte los datos de pago (SPEI / USD).`]
-      : [`No pudimos confirmar la entrega. Envía este recibo a ${BRAND.email}`, `para que ${BRAND.owner} te contacte con los datos de pago (SPEI / USD).`]),
-  ]
-    .filter((l) => l !== null)
-    .join('\n')
+    ...orderLines(o),
+    line,
+    `Tu pedido se preparó en Gmail para ${BRAND.email}.`,
+    `Si aún no lo enviaste, manda este recibo a ese correo para que ${BRAND.owner}`,
+    `te contacte con los datos de pago (SPEI / USD).`,
+  ].join('\n')
+}
+
+function gmailHref(o) {
+  const q = new URLSearchParams({ view: 'cm', fs: '1', to: BRAND.email, su: SUBJECT(o.folio), body: buildOrderEmail(o) })
+  return `https://mail.google.com/mail/?${q.toString().replace(/\+/g, '%20')}`
+}
+
+function mailtoHref(o) {
+  return `mailto:${BRAND.email}?subject=${encodeURIComponent(SUBJECT(o.folio))}&body=${encodeURIComponent(buildOrderEmail(o))}`
 }
 
 function Field({ id, label, icon: Icon, error, hint, ok, children }) {
@@ -169,7 +135,6 @@ export default function Checkout() {
   const [payment, setPayment] = useState('SPEI')
   const [form, setForm] = useState({ name: '', email: '', whatsapp: '', discord: '', details: '' })
   const [touched, setTouched] = useState({})
-  const [status, setStatus] = useState('idle')
   const [order, setOrder] = useState(null)
   const [copied, setCopied] = useState(false)
   const [history, setHistory] = useState(loadHistory)
@@ -205,7 +170,7 @@ export default function Checkout() {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
   const blur = (k) => () => setTouched((t) => ({ ...t, [k]: true }))
 
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault()
     setTouched({ _all: true })
     if (!formOk) {
@@ -236,34 +201,14 @@ export default function Checkout() {
       details: form.details.trim(),
     }
 
-    const payload = {
-      _subject: '🚀 Nueva Solicitud de Compra KODEXAR - Folio #' + folio,
-      _template: 'table',
-      _captcha: 'false',
-      _replyto: record.email,
-      Folio: folio,
-      Nombre: record.name,
-      Email: record.email,
-      WhatsApp: record.whatsapp || 'No proporcionado',
-      Discord: record.discord || 'No proporcionado',
-      Servicio: record.category,
-      Juego: record.game || 'N/A',
-      'Módulos seleccionados': record.modules.length ? record.modules.join(', ') : 'Paquete base',
-      Moneda: currency,
-      'Método de Pago': payment,
-      'Total Estimado': `${record.total} (≈ ${record.totalAlt})`,
-      'Entrega estimada': `${days} días hábiles`,
-      'Descripción del proyecto': record.details,
-      Fecha: record.date,
-    }
+    // Se abre en el mismo clic (sin await antes) para que el navegador no bloquee la ventana.
+    const win = window.open(gmailHref(record), '_blank')
+    if (win) win.opener = null
 
-    setStatus('sending')
-    const delivery = await sendOrder(payload)
-    const next = [{ folio, date: record.date, category: record.category, total: record.total, payment, delivery }, ...history].slice(0, 20)
+    const next = [{ folio, date: record.date, category: record.category, total: record.total, payment }, ...history].slice(0, 20)
     setHistory(next)
     saveHistory(next)
-    setOrder({ ...record, delivery })
-    setStatus('idle')
+    setOrder(record)
     goto(3)
   }
 
@@ -343,7 +288,7 @@ export default function Checkout() {
       )}
 
       {step === 3 && order ? (
-        <Receipt order={order} mailto={mailtoHref(order, receiptText)} copied={copied} onCopy={copy} onDownload={download} onReset={reset} />
+        <Receipt order={order} copied={copied} onCopy={copy} onDownload={download} onReset={reset} />
       ) : (
         <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
           <Panel glow={false} className="p-5 sm:p-6">
@@ -505,16 +450,13 @@ export default function Checkout() {
                   <button type="button" onClick={() => goto(1)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-line px-4 py-3 text-sm text-zinc-300 hover:border-line-strong"><ArrowLeft className="size-4" /> Atrás</button>
                   <button
                     type="submit"
-                    disabled={status === 'sending'}
                     aria-disabled={!formOk}
                     className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-bold transition ${
                       formOk ? 'bg-[var(--accent)] text-obsidian hover:brightness-110' : 'bg-white/10 text-zinc-400'
-                    } disabled:cursor-wait`}
+                    }`}
                   >
-                    {status === 'sending' ? (
-                      <><Loader2 className="size-4 animate-spin" /> Enviando a {BRAND.email}…</>
-                    ) : formOk ? (
-                      <><Send className="size-4" /> Confirmar Pedido y Enviar Solicitud</>
+                    {formOk ? (
+                      <><Send className="size-4" /> Confirmar Pedido y Enviar por Gmail</>
                     ) : (
                       <><Lock className="size-4" /> Completa tus datos para enviar</>
                     )}
@@ -557,9 +499,7 @@ export default function Checkout() {
                   {history.map((h) => (
                     <li key={h.folio} className="rounded-lg border border-line bg-obsidian p-3 text-xs">
                       <p className="flex justify-between font-mono"><b className="text-white">#{h.folio}</b><span className="text-zinc-300">{h.total}</span></p>
-                      <p className="mt-1 text-mute">{h.category} · {h.payment} · {h.date}</p>
-                      {h.delivery === 'pending' && <p className="mt-1 text-amber-300">Envío por confirmar</p>}
-                    </li>
+                      <p className="mt-1 text-mute">{h.category} · {h.payment} · {h.date}</p>                    </li>
                   ))}
                 </ul>
               </Panel>
@@ -567,37 +507,31 @@ export default function Checkout() {
           </aside>
         </div>
       )}
-      </Reveal>
-      <iframe name={IFRAME_NAME} title="Envío de respaldo" aria-hidden="true" tabIndex={-1} style={{ display: 'none' }} />
-    </Section>
+      </Reveal>    </Section>
   )
 }
 
-function Receipt({ order, mailto, copied, onCopy, onDownload, onReset }) {
-  const confirmed = order.delivery === 'confirmed'
+function Receipt({ order, copied, onCopy, onDownload, onReset }) {
   const channel = `${order.whatsapp ? ' por WhatsApp' : ''}${order.whatsapp && order.discord ? ' o' : ''}${order.discord ? ' por Discord' : ''}`
   const payWith = order.payment === 'SPEI' ? 'transferencia SPEI' : 'pago en USD'
   return (
     <Panel glow={false} className="mx-auto max-w-3xl animate-fade-up overflow-hidden">
       <div className="border-b border-line bg-[radial-gradient(ellipse_at_top,color-mix(in_srgb,var(--accent)_20%,transparent),transparent_70%)] p-6 text-center sm:p-10">
-        {confirmed ? <CheckCircle2 className="mx-auto size-14 text-[var(--accent)]" /> : <Clock className="mx-auto size-14 text-amber-400" />}
-        <p className="mt-4 font-mono text-xs tracking-widest text-mute">{confirmed ? 'RECIBO DE ORDEN CONFIRMADA' : 'RECIBO DE ORDEN · ENVÍO POR CONFIRMAR'}</p>
+        <Mail className="mx-auto size-14 text-[var(--accent)]" />
+        <p className="mt-4 font-mono text-xs tracking-widest text-mute">RECIBO DE ORDEN · LISTO PARA ENVIAR</p>
         <h3 className="mt-1 font-mono text-3xl font-bold text-white sm:text-4xl">#{order.folio}</h3>
-        {confirmed ? (
-          <p className="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-zinc-300">
-            <b className="text-white">{BRAND.owner}</b> recibió tu solicitud en <b className="text-white">{BRAND.email}</b> y se pondrá en contacto contigo{channel} para enviarte los datos de {payWith}.
-          </p>
-        ) : (
-          <>
-            <p className="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-zinc-300">
-              Tu pedido quedó registrado y se envió a <b className="text-white">{BRAND.email}</b>, pero no pudimos confirmar que llegó. Para asegurarlo,
-              mándalo por correo con un clic: ya va escrito con tu folio y tus datos.
-            </p>
-            <a href={mailto} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-5 py-3 text-sm font-bold text-obsidian hover:brightness-110">
-              <Mail className="size-4" /> Enviar por correo a {BRAND.email}
-            </a>
-          </>
-        )}
+        <p className="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-zinc-300">
+          Abrimos Gmail con tu pedido ya escrito para <b className="text-white">{BRAND.email}</b>. Solo presiona <b className="text-white">Enviar</b> en
+          Gmail y <b className="text-white">{BRAND.owner}</b> se pondrá en contacto contigo{channel} para enviarte los datos de {payWith}.
+        </p>
+        <div className="mt-5 flex flex-wrap justify-center gap-3">
+          <a href={gmailHref(order)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-5 py-3 text-sm font-bold text-obsidian hover:brightness-110">
+            <Mail className="size-4" /> Abrir Gmail de nuevo
+          </a>
+          <a href={mailtoHref(order)} className="inline-flex items-center gap-2 rounded-xl border border-line-strong px-5 py-3 text-sm text-white hover:border-[var(--accent)]">
+            <Send className="size-4" /> Usar otra app de correo
+          </a>
+        </div>
       </div>
       <dl className="grid gap-px bg-line sm:grid-cols-2">
         {[
