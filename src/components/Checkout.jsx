@@ -11,6 +11,12 @@ const STEPS = ['Configuración', 'Método de pago', 'Checkout']
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 const DISCORD_RE = /^@?[a-zA-Z0-9_.]{2,32}(#\d{4})?$/
 const FOLIO_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+const EST = '(estimación)'
+
+// Precio con la aclaración "(estimación)" al lado.
+function Est({ children, className = 'text-mute' }) {
+  return <>{children} <span className={className}>{EST}</span></>
+}
 
 function makeFolio() {
   const bytes = new Uint8Array(4)
@@ -67,8 +73,8 @@ function orderLines(o) {
     line,
     `Moneda:           ${o.currency}`,
     `Método de pago:   ${o.paymentLabel}`,
-    `Total estimado:   ${o.total}`,
-    `Equivalente:      ${o.totalAlt}`,
+    `Total estimado:   ${o.total} ${EST}`,
+    `Equivalente:      ${o.totalAlt} ${EST}`,
     line,
     `Descripción del proyecto:`,
     o.details,
@@ -100,8 +106,8 @@ function buildOrderWhatsApp(o) {
     `💳 *PAGO*`,
     `*Moneda:* ${o.currency}`,
     `*Método de pago:* ${o.paymentLabel}`,
-    `*Total estimado:* ${o.total}`,
-    `*Equivalente:* ${o.totalAlt}`,
+    `*Total estimado:* ${o.total} ${EST}`,
+    `*Equivalente:* ${o.totalAlt} ${EST}`,
     '',
     `📝 *Descripción del proyecto:*`,
     o.details,
@@ -337,7 +343,7 @@ export default function Checkout() {
                           </span>
                         </span>
                         <span className="mt-1 block text-xs text-mute">{c.desc}</span>
-                        <span className="mt-3 block font-mono text-xs text-zinc-300">desde {format(c.basePrice)}</span>
+                        <span className="mt-3 block font-mono text-xs text-zinc-300">desde <Est>{format(c.basePrice)}</Est></span>
                       </button>
                     )
                   })}
@@ -365,7 +371,7 @@ export default function Checkout() {
                         />
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm text-zinc-100">{f.label}</span>
-                          <span className="font-mono text-[11px] text-mute">+{format(f.price)} · +{f.days}d</span>
+                          <span className="font-mono text-[11px] text-mute"><Est className="">+{format(f.price)}</Est> · +{f.days}d</span>
                         </span>
                       </label>
                     )
@@ -405,7 +411,7 @@ export default function Checkout() {
                             <span className={`rounded-md px-2 py-0.5 font-mono text-[10px] ${m.id === 'SPEI' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-zinc-300'}`}>{m.badge}</span>
                           </span>
                           <span className="mt-1 block text-sm text-mute">{m.desc}</span>
-                          <span className="mt-2 block font-mono text-sm text-zinc-200">{formatMoney(totalMxn, m.currency)}</span>
+                          <span className="mt-2 block font-mono text-sm text-zinc-200"><Est>{formatMoney(totalMxn, m.currency)}</Est></span>
                         </span>
                         <span className={`mt-1 grid size-5 shrink-0 place-items-center rounded-full border ${on ? 'border-[var(--accent)]' : 'border-line-strong'}`}>
                           {on && <span className="size-2.5 rounded-full bg-[var(--accent)]" />}
@@ -495,16 +501,16 @@ export default function Checkout() {
               <p className="mt-2 font-display text-lg font-semibold text-white">{cat.emoji} {cat.title}</p>
               {cat.requiresGame && <p className="text-sm text-mute">Juego: {game.trim() || '—'}</p>}
               <ul className="mt-4 space-y-2 border-t border-line pt-4 text-sm">
-                <li className="flex justify-between gap-3 text-zinc-300"><span>Paquete base</span><span className="font-mono">{format(cat.basePrice)}</span></li>
+                <li className="flex justify-between gap-3 text-zinc-300"><span>Paquete base</span><span className="shrink-0 font-mono"><Est>{format(cat.basePrice)}</Est></span></li>
                 {chosen.map((f) => (
-                  <li key={f.id} className="flex justify-between gap-3 text-zinc-400"><span className="min-w-0 truncate">{f.label}</span><span className="shrink-0 font-mono">+{format(f.price)}</span></li>
+                  <li key={f.id} className="flex justify-between gap-3 text-zinc-400"><span className="min-w-0 truncate">{f.label}</span><span className="shrink-0 font-mono"><Est>+{format(f.price)}</Est></span></li>
                 ))}
               </ul>
               <div className="mt-4 border-t border-line pt-4">
                 <p className="flex items-center justify-between text-sm text-mute"><span className="flex items-center gap-1.5"><Clock className="size-4" /> Entrega estimada</span><span className="font-mono text-white">{days} días hábiles</span></p>
                 <p className="mt-3 text-xs text-mute">Total estimado</p>
-                <p className="font-mono text-3xl font-bold text-white">{format(totalMxn)}</p>
-                <p className="font-mono text-xs text-mute">≈ {formatMoney(totalMxn, currency === 'MXN' ? 'USD' : 'MXN')} · 1 USD = {PRICING.mxnPerUsd} MXN</p>
+                <p className="font-mono text-3xl font-bold text-white"><Est className="text-sm font-normal text-mute">{format(totalMxn)}</Est></p>
+                <p className="font-mono text-xs text-mute">≈ <Est className="">{formatMoney(totalMxn, currency === 'MXN' ? 'USD' : 'MXN')}</Est> · 1 USD = {PRICING.mxnPerUsd} MXN</p>
               </div>
               <div className="mt-4 rounded-xl bg-emerald-500/10 p-3 text-xs text-emerald-200">
                 🇲🇽 {PRICING.paymentNote}.
@@ -521,7 +527,7 @@ export default function Checkout() {
                 <ul className="mt-3 space-y-2">
                   {history.map((h) => (
                     <li key={h.folio} className="rounded-lg border border-line bg-obsidian p-3 text-xs">
-                      <p className="flex justify-between font-mono"><b className="text-white">#{h.folio}</b><span className="text-zinc-300">{h.total}</span></p>
+                      <p className="flex justify-between font-mono"><b className="text-white">#{h.folio}</b><span className="text-zinc-300"><Est>{h.total}</Est></span></p>
                       <p className="mt-1 text-mute">{h.category} · {h.payment} · {h.date}</p>                    </li>
                   ))}
                 </ul>
@@ -562,7 +568,7 @@ function Receipt({ order, copied, onCopy, onDownload, onReset }) {
           ['Servicio', order.category + (order.game ? ` · ${order.game}` : '')],
           ['Entrega estimada', `${order.days} días hábiles`],
           ['Método de pago', order.paymentLabel],
-          ['Total estimado', `${order.total}  (≈ ${order.totalAlt})`],
+          ['Total estimado', `${order.total} ${EST} · ≈ ${order.totalAlt} ${EST}`],
         ].map(([k, v]) => (
           <div key={k} className="bg-carbon p-4">
             <dt className="text-xs text-mute">{k}</dt>
