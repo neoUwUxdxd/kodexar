@@ -49,10 +49,65 @@ export function validate(form) {
   return e
 }
 
+const IFRAME_NAME = 'hidden_formsubmit_iframe'
+
+function toFormData(fields) {
+  const fd = new FormData()
+  Object.entries(fields).forEach(([k, v]) => fd.append(k, v))
+  return fd
+}
+
+// Respaldo sin CORS: POST estándar desde un <form> oculto hacia el iframe oculto.
+// El navegador no deja leer la respuesta, así que la entrega queda "por confirmar".
+function submitHiddenForm(fields) {
+  return new Promise((resolve) => {
+    const form = document.createElement('form')
+    form.action = BRAND.formFallbackEndpoint
+    form.method = 'POST'
+    form.target = IFRAME_NAME
+    form.style.display = 'none'
+    Object.entries(fields).forEach(([k, v]) => {
+      const input = document.createElement('input')
+      input.type = 'hidden'
+      input.name = k
+      input.value = v
+      form.appendChild(input)
+    })
+    document.body.appendChild(form)
+    form.submit()
+    form.remove()
+    setTimeout(resolve, 1200)
+  })
+}
+
+// Envía el pedido: AJAX con FormData (sin preflight) y, si falla o pide activación,
+// respaldo con formulario oculto. Devuelve 'confirmed' o 'pending'.
+async function sendOrder(fields) {
+  try {
+    const res = await fetch(BRAND.formEndpoint, {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      body: toFormData(fields),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok && String(data.success) === 'true') return 'confirmed'
+  } catch {
+    /* bloqueo del navegador, CORS o servidor caído: se usa el respaldo */
+  }
+  await submitHiddenForm(fields)
+  return 'pending'
+}
+
+function mailtoHref(o, text) {
+  const subject = `Solicitud de Compra KODEXAR - Folio #${o.folio}`
+  return `mailto:${BRAND.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`
+}
+
 function buildReceiptText(o) {
   const line = '─'.repeat(44)
+  const confirmed = o.delivery === 'confirmed'
   return [
-    `KODEXAR — Recibo de Orden Confirmada`,
+    confirmed ? `KODEXAR — Recibo de Orden Confirmada` : `KODEXAR — Recibo de Orden (envío por confirmar)`,
     line,
     `Folio:            #${o.folio}`,
     `Fecha:            ${o.date}`,
@@ -61,7 +116,7 @@ function buildReceiptText(o) {
     `WhatsApp:         ${o.whatsapp || 'No proporcionado'}`,
     `Discord:          ${o.discord || 'No proporcionado'}`,
     line,
-    `Categoría:        ${o.category}`,
+    `Servicio:         ${o.category}`,
     o.game ? `Juego:            ${o.game}` : null,
     `Módulos:`,
     ...(o.modules.length ? o.modules.map((m) => `  • ${m}`) : ['  • Paquete base']),
@@ -75,8 +130,9 @@ function buildReceiptText(o) {
     `Descripción del proyecto:`,
     o.details,
     line,
-    `${BRAND.owner} recibió tu solicitud en ${BRAND.email} y te contactará`,
-    `para enviarte los datos de pago (SPEI / USD).`,
+    ...(confirmed
+      ? [`${BRAND.owner} recibió tu solicitud en ${BRAND.email} y te contactará`, `para enviarte los datos de pago (SPEI / USD).`]
+      : [`No pudimos confirmar la entrega. Envía este recibo a ${BRAND.email}`, `para que ${BRAND.owner} te contacte con los datos de pago (SPEI / USD).`]),
   ]
     .filter((l) => l !== null)
     .join('\n')
@@ -114,7 +170,6 @@ export default function Checkout() {
   const [form, setForm] = useState({ name: '', email: '', whatsapp: '', discord: '', details: '' })
   const [touched, setTouched] = useState({})
   const [status, setStatus] = useState('idle')
-  const [errMsg, setErrMsg] = useState('')
   const [order, setOrder] = useState(null)
   const [copied, setCopied] = useState(false)
   const [history, setHistory] = useState(loadHistory)
@@ -184,13 +239,14 @@ export default function Checkout() {
     const payload = {
       _subject: '🚀 Nueva Solicitud de Compra KODEXAR - Folio #' + folio,
       _template: 'table',
+      _captcha: 'false',
       _replyto: record.email,
       Folio: folio,
       Nombre: record.name,
       Email: record.email,
       WhatsApp: record.whatsapp || 'No proporcionado',
       Discord: record.discord || 'No proporcionado',
-      'Categoría': record.category,
+      Servicio: record.category,
       Juego: record.game || 'N/A',
       'Módulos seleccionados': record.modules.length ? record.modules.join(', ') : 'Paquete base',
       Moneda: currency,
@@ -202,27 +258,13 @@ export default function Checkout() {
     }
 
     setStatus('sending')
-    setErrMsg('')
-    try {
-      const res = await fetch(BRAND.formEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok || String(data.success) !== 'true') {
-        throw new Error(data.message || `El servidor respondió con estado ${res.status}.`)
-      }
-      const next = [{ folio, date: record.date, category: record.category, total: record.total, payment }, ...history].slice(0, 20)
-      setHistory(next)
-      saveHistory(next)
-      setOrder(record)
-      setStatus('idle')
-      goto(3)
-    } catch (err) {
-      setStatus('error')
-      setErrMsg(err instanceof TypeError ? 'No hay conexión con el servidor de correo. Revisa tu internet e inténtalo de nuevo.' : err.message)
-    }
+    const delivery = await sendOrder(payload)
+    const next = [{ folio, date: record.date, category: record.category, total: record.total, payment, delivery }, ...history].slice(0, 20)
+    setHistory(next)
+    saveHistory(next)
+    setOrder({ ...record, delivery })
+    setStatus('idle')
+    goto(3)
   }
 
   const receiptText = order ? buildReceiptText(order) : ''
@@ -301,7 +343,7 @@ export default function Checkout() {
       )}
 
       {step === 3 && order ? (
-        <Receipt order={order} copied={copied} onCopy={copy} onDownload={download} onReset={reset} />
+        <Receipt order={order} mailto={mailtoHref(order, receiptText)} copied={copied} onCopy={copy} onDownload={download} onReset={reset} />
       ) : (
         <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
           <Panel glow={false} className="p-5 sm:p-6">
@@ -459,16 +501,6 @@ export default function Checkout() {
                   <p className="mt-1 text-right font-mono text-[10px] text-mute">{form.details.trim().length} / 15 mín.</p>
                 </div>
 
-                {status === 'error' && (
-                  <div role="alert" className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-200">
-                    <p className="flex items-center gap-2 font-semibold"><AlertCircle className="size-4" /> No se pudo enviar la solicitud</p>
-                    <p className="mt-1 text-red-200/80">{errMsg}</p>
-                    <p className="mt-2 text-xs text-red-200/70">
-                      Tus datos siguen aquí. Reintenta o escribe directo a <a className="underline" href={`mailto:${BRAND.email}`}>{BRAND.email}</a>.
-                    </p>
-                  </div>
-                )}
-
                 <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
                   <button type="button" onClick={() => goto(1)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-line px-4 py-3 text-sm text-zinc-300 hover:border-line-strong"><ArrowLeft className="size-4" /> Atrás</button>
                   <button
@@ -526,6 +558,7 @@ export default function Checkout() {
                     <li key={h.folio} className="rounded-lg border border-line bg-obsidian p-3 text-xs">
                       <p className="flex justify-between font-mono"><b className="text-white">#{h.folio}</b><span className="text-zinc-300">{h.total}</span></p>
                       <p className="mt-1 text-mute">{h.category} · {h.payment} · {h.date}</p>
+                      {h.delivery === 'pending' && <p className="mt-1 text-amber-300">Envío por confirmar</p>}
                     </li>
                   ))}
                 </ul>
@@ -535,22 +568,36 @@ export default function Checkout() {
         </div>
       )}
       </Reveal>
+      <iframe name={IFRAME_NAME} title="Envío de respaldo" aria-hidden="true" tabIndex={-1} style={{ display: 'none' }} />
     </Section>
   )
 }
 
-function Receipt({ order, copied, onCopy, onDownload, onReset }) {
+function Receipt({ order, mailto, copied, onCopy, onDownload, onReset }) {
+  const confirmed = order.delivery === 'confirmed'
+  const channel = `${order.whatsapp ? ' por WhatsApp' : ''}${order.whatsapp && order.discord ? ' o' : ''}${order.discord ? ' por Discord' : ''}`
+  const payWith = order.payment === 'SPEI' ? 'transferencia SPEI' : 'pago en USD'
   return (
     <Panel glow={false} className="mx-auto max-w-3xl animate-fade-up overflow-hidden">
       <div className="border-b border-line bg-[radial-gradient(ellipse_at_top,color-mix(in_srgb,var(--accent)_20%,transparent),transparent_70%)] p-6 text-center sm:p-10">
-        <CheckCircle2 className="mx-auto size-14 text-[var(--accent)]" />
-        <p className="mt-4 font-mono text-xs tracking-widest text-mute">RECIBO DE ORDEN CONFIRMADA</p>
+        {confirmed ? <CheckCircle2 className="mx-auto size-14 text-[var(--accent)]" /> : <Clock className="mx-auto size-14 text-amber-400" />}
+        <p className="mt-4 font-mono text-xs tracking-widest text-mute">{confirmed ? 'RECIBO DE ORDEN CONFIRMADA' : 'RECIBO DE ORDEN · ENVÍO POR CONFIRMAR'}</p>
         <h3 className="mt-1 font-mono text-3xl font-bold text-white sm:text-4xl">#{order.folio}</h3>
-        <p className="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-zinc-300">
-          <b className="text-white">{BRAND.owner}</b> recibió tu solicitud en <b className="text-white">{BRAND.email}</b> y se pondrá en contacto contigo
-          {order.whatsapp ? ' por WhatsApp' : ''}{order.whatsapp && order.discord ? ' o' : ''}{order.discord ? ' por Discord' : ''} para enviarte los datos de{' '}
-          {order.payment === 'SPEI' ? 'transferencia SPEI' : 'pago en USD'}.
-        </p>
+        {confirmed ? (
+          <p className="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-zinc-300">
+            <b className="text-white">{BRAND.owner}</b> recibió tu solicitud en <b className="text-white">{BRAND.email}</b> y se pondrá en contacto contigo{channel} para enviarte los datos de {payWith}.
+          </p>
+        ) : (
+          <>
+            <p className="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-zinc-300">
+              Tu pedido quedó registrado y se envió a <b className="text-white">{BRAND.email}</b>, pero no pudimos confirmar que llegó. Para asegurarlo,
+              mándalo por correo con un clic: ya va escrito con tu folio y tus datos.
+            </p>
+            <a href={mailto} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-5 py-3 text-sm font-bold text-obsidian hover:brightness-110">
+              <Mail className="size-4" /> Enviar por correo a {BRAND.email}
+            </a>
+          </>
+        )}
       </div>
       <dl className="grid gap-px bg-line sm:grid-cols-2">
         {[
@@ -558,7 +605,7 @@ function Receipt({ order, copied, onCopy, onDownload, onReset }) {
           ['Correo', order.email],
           ['WhatsApp', order.whatsapp || '—'],
           ['Discord', order.discord || '—'],
-          ['Categoría', order.category + (order.game ? ` · ${order.game}` : '')],
+          ['Servicio', order.category + (order.game ? ` · ${order.game}` : '')],
           ['Entrega estimada', `${order.days} días hábiles`],
           ['Método de pago', order.paymentLabel],
           ['Total estimado', `${order.total}  (≈ ${order.totalAlt})`],
