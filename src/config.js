@@ -8,6 +8,9 @@ export const BRAND = {
   owner: 'Yamil',
   role: 'Ingeniero de Software Políglota',
   email: 'kodexar@icloud.com',
+  // Número de WhatsApp que recibe los pedidos (solo dígitos, con lada de país).
+  whatsapp: '525565304301',
+  whatsappDisplay: '+52 56 5530 4301',
   tagline: 'Si se puede imaginar, Kodexar lo programa',
   available: true,
   storageKey: 'kodexar:orders',

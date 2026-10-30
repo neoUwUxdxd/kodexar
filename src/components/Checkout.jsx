@@ -49,8 +49,6 @@ export function validate(form) {
   return e
 }
 
-const SUBJECT = (folio) => '🚀 Nueva Solicitud de Compra KODEXAR - Folio #' + folio
-
 function orderLines(o) {
   const line = '─'.repeat(44)
   return [
@@ -77,9 +75,39 @@ function orderLines(o) {
   ].filter((l) => l !== null)
 }
 
-// Correo que el cliente envía a Yamil desde su propia cuenta.
-function buildOrderEmail(o) {
-  return [`Hola ${BRAND.owner}, quiero hacer este pedido en ${BRAND.name}:`, '', ...orderLines(o), '', 'Quedo atento(a) a los datos de pago.', `— ${o.name}`].join('\n')
+// Mensaje de WhatsApp que el cliente envía a Yamil desde su propia cuenta (*texto* = negritas).
+function buildOrderWhatsApp(o) {
+  return [
+    `🚀 *Nueva Solicitud de Compra ${BRAND.name}*`,
+    `Hola ${BRAND.owner}, quiero hacer este pedido:`,
+    '',
+    `*Folio:* #${o.folio}`,
+    `*Fecha:* ${o.date}`,
+    '',
+    `👤 *DATOS DE CONTACTO*`,
+    `*Cliente:* ${o.name}`,
+    `*Correo:* ${o.email}`,
+    `*WhatsApp:* ${o.whatsapp || 'No proporcionado'}`,
+    `*Discord:* ${o.discord || 'No proporcionado'}`,
+    '',
+    `🛠️ *PROYECTO*`,
+    `*Servicio:* ${o.category}`,
+    o.game ? `*Juego:* ${o.game}` : null,
+    `*Módulos:*`,
+    ...(o.modules.length ? o.modules.map((m) => `• ${m}`) : ['• Paquete base']),
+    `*Entrega estimada:* ${o.days} días hábiles`,
+    '',
+    `💳 *PAGO*`,
+    `*Moneda:* ${o.currency}`,
+    `*Método de pago:* ${o.paymentLabel}`,
+    `*Total estimado:* ${o.total}`,
+    `*Equivalente:* ${o.totalAlt}`,
+    '',
+    `📝 *Descripción del proyecto:*`,
+    o.details,
+    '',
+    'Quedo atento(a) a los datos de pago.',
+  ].filter((l) => l !== null).join('\n')
 }
 
 function buildReceiptText(o) {
@@ -89,19 +117,14 @@ function buildReceiptText(o) {
     line,
     ...orderLines(o),
     line,
-    `Tu pedido se preparó en Gmail para ${BRAND.email}.`,
-    `Si aún no lo enviaste, manda este recibo a ese correo para que ${BRAND.owner}`,
+    `Tu pedido se preparó en WhatsApp para ${BRAND.whatsappDisplay}.`,
+    `Si aún no lo enviaste, manda este recibo a ese número para que ${BRAND.owner}`,
     `te contacte con los datos de pago (SPEI / USD).`,
   ].join('\n')
 }
 
-function gmailHref(o) {
-  const q = new URLSearchParams({ view: 'cm', fs: '1', to: BRAND.email, su: SUBJECT(o.folio), body: buildOrderEmail(o) })
-  return `https://mail.google.com/mail/?${q.toString().replace(/\+/g, '%20')}`
-}
-
-function mailtoHref(o) {
-  return `mailto:${BRAND.email}?subject=${encodeURIComponent(SUBJECT(o.folio))}&body=${encodeURIComponent(buildOrderEmail(o))}`
+function whatsappHref(o) {
+  return `https://wa.me/${BRAND.whatsapp}?text=${encodeURIComponent(buildOrderWhatsApp(o))}`
 }
 
 function Field({ id, label, icon: Icon, error, hint, ok, children }) {
@@ -202,7 +225,7 @@ export default function Checkout() {
     }
 
     // Se abre en el mismo clic (sin await antes) para que el navegador no bloquee la ventana.
-    const win = window.open(gmailHref(record), '_blank')
+    const win = window.open(whatsappHref(record), '_blank')
     if (win) win.opener = null
 
     const next = [{ folio, date: record.date, category: record.category, total: record.total, payment }, ...history].slice(0, 20)
@@ -259,7 +282,7 @@ export default function Checkout() {
       <SectionHeader
         label="SISTEMA DE COMPRA // KODEXAR"
         title="Cotiza, configura y envía tu pedido."
-        desc={`Precio y tiempo de entrega calculados en vivo. Tu solicitud llega directo al correo de ${BRAND.owner}: ${BRAND.email}.`}
+        desc={`Precio y tiempo de entrega calculados en vivo. Tu solicitud llega directo al WhatsApp de ${BRAND.owner}: ${BRAND.whatsappDisplay}.`}
       />
 
       <Reveal delay={120}>
@@ -456,7 +479,7 @@ export default function Checkout() {
                     }`}
                   >
                     {formOk ? (
-                      <><Send className="size-4" /> Confirmar Pedido y Enviar por Gmail</>
+                      <><Send className="size-4" /> Confirmar Pedido y Enviar por WhatsApp</>
                     ) : (
                       <><Lock className="size-4" /> Completa tus datos para enviar</>
                     )}
@@ -517,19 +540,16 @@ function Receipt({ order, copied, onCopy, onDownload, onReset }) {
   return (
     <Panel glow={false} className="mx-auto max-w-3xl animate-fade-up overflow-hidden">
       <div className="border-b border-line bg-[radial-gradient(ellipse_at_top,color-mix(in_srgb,var(--accent)_20%,transparent),transparent_70%)] p-6 text-center sm:p-10">
-        <Mail className="mx-auto size-14 text-[var(--accent)]" />
+        <MessageCircle className="mx-auto size-14 text-[var(--accent)]" />
         <p className="mt-4 font-mono text-xs tracking-widest text-mute">RECIBO DE ORDEN · LISTO PARA ENVIAR</p>
         <h3 className="mt-1 font-mono text-3xl font-bold text-white sm:text-4xl">#{order.folio}</h3>
         <p className="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-zinc-300">
-          Abrimos Gmail con tu pedido ya escrito para <b className="text-white">{BRAND.email}</b>. Solo presiona <b className="text-white">Enviar</b> en
-          Gmail y <b className="text-white">{BRAND.owner}</b> se pondrá en contacto contigo{channel} para enviarte los datos de {payWith}.
+          Abrimos WhatsApp con tu pedido ya escrito para <b className="text-white">{BRAND.whatsappDisplay}</b>. Solo presiona <b className="text-white">Enviar</b> en
+          WhatsApp y <b className="text-white">{BRAND.owner}</b> se pondrá en contacto contigo{channel} para enviarte los datos de {payWith}.
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-3">
-          <a href={gmailHref(order)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-5 py-3 text-sm font-bold text-obsidian hover:brightness-110">
-            <Mail className="size-4" /> Abrir Gmail de nuevo
-          </a>
-          <a href={mailtoHref(order)} className="inline-flex items-center gap-2 rounded-xl border border-line-strong px-5 py-3 text-sm text-white hover:border-[var(--accent)]">
-            <Send className="size-4" /> Usar otra app de correo
+          <a href={whatsappHref(order)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-5 py-3 text-sm font-bold text-obsidian hover:brightness-110">
+            <MessageCircle className="size-4" /> Abrir WhatsApp de nuevo
           </a>
         </div>
       </div>
