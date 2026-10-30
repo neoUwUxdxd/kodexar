@@ -175,9 +175,10 @@ export default function Hero() {
         </Reveal>
         <Reveal delay={150}>
         <p className="mt-6 max-w-2xl text-lg leading-relaxed text-mute">
-          Soy <strong className="text-white">{BRAND.owner}</strong>, ingeniero de software políglota y fundador de{' '}
-          <strong className="text-white">{BRAND.name}</strong>. Desarrollo sin límites en cualquier lenguaje: páginas web de alta
-          conversión, bots de Discord a medida y mods para cualquier videojuego. No te lo cuento: pruébalo aquí abajo.
+          Soy <strong className="text-white">{BRAND.owner}</strong>, desarrollador y fundador de{' '}
+          <strong className="text-white">{BRAND.name}</strong>. Creo páginas web de alta conversión, bots de Discord a medida y mods
+          para cualquier videojuego en cualquier lenguaje de programación (atención en Español, English &amp; Français). No te lo
+          cuento: pruébalo aquí abajo.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
           <a href="#cotizar" className="inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 font-semibold text-obsidian transition hover:bg-zinc-200">
