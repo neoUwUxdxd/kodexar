@@ -82,34 +82,36 @@ function orderLines(o) {
 }
 
 // Mensaje de WhatsApp que el cliente envía a Yamil desde su propia cuenta (*texto* = negritas).
+// Solo usa símbolos del plano básico (⚡ ☎️ ⚙️ ✅ ✏️): WhatsApp en computadora convierte
+// emojis como 🚀 o banderas en "�".
 function buildOrderWhatsApp(o) {
   return [
-    `🚀 *Nueva Solicitud de Compra ${BRAND.name}*`,
+    `⚡ *Nueva Solicitud de Compra ${BRAND.name}*`,
     `Hola ${BRAND.owner}, quiero hacer este pedido:`,
     '',
     `*Folio:* #${o.folio}`,
     `*Fecha:* ${o.date}`,
     '',
-    `👤 *DATOS DE CONTACTO*`,
+    `☎️ *DATOS DE CONTACTO*`,
     `*Cliente:* ${o.name}`,
     `*Correo:* ${o.email}`,
     `*WhatsApp:* ${o.whatsapp || 'No proporcionado'}`,
     `*Discord:* ${o.discord || 'No proporcionado'}`,
     '',
-    `🛠️ *PROYECTO*`,
-    `*Servicio:* ${o.category}`,
+    `⚙️ *PROYECTO*`,
+    `*Servicio:* ${o.service}`,
     o.game ? `*Juego:* ${o.game}` : null,
     `*Módulos:*`,
     ...(o.modules.length ? o.modules.map((m) => `• ${m}`) : ['• Paquete base']),
     `*Entrega estimada:* ${o.days} días hábiles`,
     '',
-    `💳 *PAGO*`,
+    `✅ *PAGO*`,
     `*Moneda:* ${o.currency}`,
-    `*Método de pago:* ${o.paymentLabel}`,
+    `*Método de pago:* ${o.paymentTitle}`,
     `*Total estimado:* ${o.total} ${EST}`,
     `*Equivalente:* ${o.totalAlt} ${EST}`,
     '',
-    `📝 *Descripción del proyecto:*`,
+    `✏️ *Descripción del proyecto:*`,
     o.details,
     '',
     'Quedo atento(a) a los datos de pago.',
@@ -129,8 +131,23 @@ function buildReceiptText(o) {
   ].join('\n')
 }
 
+function isMobile() {
+  const ua = navigator.userAgent
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
+}
+
+// En celular wa.me abre la app. En computadora wa.me pasa por una página intermedia que a veces
+// pierde el número y el texto, así que se abre WhatsApp Web directo.
 function whatsappHref(o) {
-  return `https://wa.me/${BRAND.whatsapp}?text=${encodeURIComponent(buildOrderWhatsApp(o))}`
+  const text = encodeURIComponent(buildOrderWhatsApp(o))
+  return isMobile()
+    ? `https://wa.me/${BRAND.whatsapp}?text=${text}`
+    : `https://web.whatsapp.com/send?phone=${BRAND.whatsapp}&text=${text}`
+}
+
+// App de escritorio de WhatsApp (Windows / Mac), sin pasar por la página intermedia.
+function whatsappAppHref(o) {
+  return `whatsapp://send?phone=${BRAND.whatsapp}&text=${encodeURIComponent(buildOrderWhatsApp(o))}`
 }
 
 function Field({ id, label, icon: Icon, error, hint, ok, children }) {
@@ -219,12 +236,14 @@ export default function Checkout() {
       whatsapp: form.whatsapp.trim(),
       discord: form.discord.trim(),
       category: `${cat.emoji} ${cat.title}`,
+      service: cat.title,
       game: cat.requiresGame ? game.trim() : '',
       modules: chosen.map((f) => f.label),
       days,
       currency,
       payment,
       paymentLabel: `${pay.flag} ${pay.title}`,
+      paymentTitle: pay.title,
       total: format(totalMxn),
       totalAlt: formatMoney(totalMxn, altCurrency),
       details: form.details.trim(),
@@ -253,18 +272,18 @@ export default function Checkout() {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  const copy = async () => {
+  const copy = async (text, key) => {
     try {
-      await navigator.clipboard.writeText(receiptText)
+      await navigator.clipboard.writeText(text)
     } catch {
       const ta = document.createElement('textarea')
-      ta.value = receiptText
+      ta.value = text
       document.body.appendChild(ta)
       ta.select()
       document.execCommand('copy')
       ta.remove()
     }
-    setCopied(true)
+    setCopied(key)
     setTimeout(() => setCopied(false), 1800)
   }
 
@@ -317,7 +336,14 @@ export default function Checkout() {
       )}
 
       {step === 3 && order ? (
-        <Receipt order={order} copied={copied} onCopy={copy} onDownload={download} onReset={reset} />
+        <Receipt
+          order={order}
+          copied={copied}
+          onCopy={() => copy(receiptText, 'receipt')}
+          onCopyMessage={() => copy(buildOrderWhatsApp(order), 'message')}
+          onDownload={download}
+          onReset={reset}
+        />
       ) : (
         <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
           <Panel glow={false} className="p-5 sm:p-6">
@@ -540,7 +566,8 @@ export default function Checkout() {
   )
 }
 
-function Receipt({ order, copied, onCopy, onDownload, onReset }) {
+function Receipt({ order, copied, onCopy, onCopyMessage, onDownload, onReset }) {
+  const desktop = !isMobile()
   const channel = `${order.whatsapp ? ' por WhatsApp' : ''}${order.whatsapp && order.discord ? ' o' : ''}${order.discord ? ' por Discord' : ''}`
   const payWith = order.payment === 'SPEI' ? 'transferencia SPEI' : 'pago en USD'
   return (
@@ -555,9 +582,23 @@ function Receipt({ order, copied, onCopy, onDownload, onReset }) {
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-3">
           <a href={whatsappHref(order)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-5 py-3 text-sm font-bold text-obsidian hover:brightness-110">
-            <MessageCircle className="size-4" /> Abrir WhatsApp de nuevo
+            <MessageCircle className="size-4" /> {desktop ? 'Abrir WhatsApp Web de nuevo' : 'Abrir WhatsApp de nuevo'}
           </a>
+          {desktop && (
+            <a href={whatsappAppHref(order)} className="inline-flex items-center gap-2 rounded-xl border border-line-strong px-5 py-3 text-sm text-white hover:border-[var(--accent)]">
+              <MessageCircle className="size-4" /> Usar la app de escritorio
+            </a>
+          )}
         </div>
+        {desktop && (
+          <p className="mx-auto mt-4 max-w-lg text-xs text-mute">
+            ¿No se escribió el mensaje?{' '}
+            <button onClick={onCopyMessage} className="font-semibold text-white underline underline-offset-2 hover:text-[var(--accent)]">
+              {copied === 'message' ? 'Mensaje copiado ✓' : 'Copia el mensaje'}
+            </button>{' '}
+            y pégalo en el chat con {BRAND.whatsappDisplay}.
+          </p>
+        )}
       </div>
       <dl className="grid gap-px bg-line sm:grid-cols-2">
         {[
@@ -585,7 +626,7 @@ function Receipt({ order, copied, onCopy, onDownload, onReset }) {
       <div className="flex flex-wrap gap-3 border-t border-line p-5">
         <button onClick={onDownload} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-obsidian hover:bg-zinc-200"><Download className="size-4" /> Descargar recibo .txt</button>
         <button onClick={onCopy} className="inline-flex items-center gap-2 rounded-xl border border-line-strong px-4 py-2.5 text-sm text-white hover:border-[var(--accent)]">
-          {copied ? <Check className="size-4 text-emerald-400" /> : <ClipboardCopy className="size-4" />} {copied ? 'Copiado' : 'Copiar recibo'}
+          {copied === 'receipt' ? <Check className="size-4 text-emerald-400" /> : <ClipboardCopy className="size-4" />} {copied === 'receipt' ? 'Copiado' : 'Copiar recibo'}
         </button>
         <button onClick={onReset} className="ml-auto inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm text-mute hover:text-white"><RotateCcw className="size-4" /> Nueva solicitud</button>
       </div>
